@@ -6,7 +6,7 @@ define("SUPERUSER", "username");
 define("PASSWORD", "password");
 define("CLIENTID", "clientid");
 define("CLIENTSECRET", "clientsecret");
-define("DIALDIGIT", 3);
+define("DIALDIGIT", "3");
 define("ANONYMOUS", "anonymous");
 
 session_start();
@@ -17,43 +17,53 @@ echo '<?xml version="1.0" encoding="UTF-8" standalone="no"?>';
 
 if (!isset($_REQUEST["Digits"]))
 {
+  // this case is no digits are entered - so initial entry into web responder
   $http_response = "";
-
+  
+  // get NS-API token
   $token = __getToken();
+	
+  // get caller user and domain
   $user=$_REQUEST["AccountUser"];
   $domain=$_REQUEST["AccountDomain"];
 
+  // NS-API data structure to get last call
   $query = array(
         'object' => 'cdr2',
         'action'=> 'read',
-        'uid'    =>    "{$user}@{$domain}",
+        'uid'    => "{$user}@{$domain}",
 	'type'   => 'Inbound',
 	'limit'  => '1',
 	'format' => 'json',
   );
 
+  // do API call and decode json
   $lastcall = __doCurl("https://".SERVER."/ns-api/", CURLOPT_POST, "Authorization: Bearer " . $token, $query, null, $http_response);
   $lastcall = json_decode($lastcall,true);
 
+  // create random temp file name and path
   $tempfile = mt_rand() . ".wav";
   $tempfileuri = AUDIOFOLDER ."tmp/" . $tempfile;
 
+  // gets the actual caller number from the data returned from the API call
   $caller = $lastcall[0]["number"];
 
-  // remove leading +
   if (substr($caller,0,1) == "+")
   {
+     // remove leading +
      $caller = substr($caller,1);
   }
   else if ($caller == ANONYMOUS)
   {
+     // handle anonymous last caller
      echo "<Play> http://" . SERVER . "/" . AUDIOFOLDER . "anon.wav</Play>";
      exit();
   }
 
+  // generate sox command to combine the prompts and last caller number
   $wavfiles = "sox " . AUDIOFOLDER . "lastcaller.wav ";
 
-  // collect digit wav files
+  // gets the digits from the caller
   $callerloop = $caller;
   while (strlen($callerloop) > 0)
   {
@@ -61,22 +71,25 @@ if (!isset($_REQUEST["Digits"]))
     $callerloop = substr($callerloop, 1);
     $wavfiles .= AUDIOFOLDER. "nms-word-{$digit}.wav ";
   }
-
+  // adds the final prompt and output filename
   $wavfiles .= AUDIOFOLDER. "toreturn.wav {$tempfileuri}";
 
+  // runs the sox command
   exec($wavfiles);
 
+  // do the web responder gather function, post back last caller
   echo "<Gather numDigits='1' action='ukcallback.php?caller={$caller}'><Play>http://" . SERVER . "/" . AUDIOFOLDER.  "tmp/{$tempfile}</Play></Gather>";
 
 }
-else if ($_REQUEST["Digits"] == "3")
+else if ($_REQUEST["Digits"] == DIALDIGIT)
 {
+  // caller entered digit to return call, do forward to the last caller number
   echo "<Forward>" . $_REQUEST["caller"] . "</Forward>";
 }
 else 
 {
+  // caller entered invalid input
   echo "<Play> http://" . SERVER . "/" . AUDIOFOLDER . "invalid.wav</Play>";
-  exit();
 }
 
 
