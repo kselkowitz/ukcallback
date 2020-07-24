@@ -8,6 +8,7 @@ define("CLIENTID", "clientid");
 define("CLIENTSECRET", "clientsecret");
 define("DIALDIGIT", "3");
 define("ANONYMOUS", "anonymous");
+define("HOURCLOCK", 24); // 12 or 24 hour clock
 
 session_start();
 header("Content-Type: text/xml");
@@ -45,9 +46,39 @@ if (!isset($_REQUEST["Digits"]))
   $tempfile = mt_rand() . ".wav";
   $tempfileuri = AUDIOFOLDER ."tmp/" . $tempfile;
 
-  // gets the actual caller number from the data returned from the API call
+  // gets the actual caller number and call epoch time from the data returned from the API call
   $caller = $lastcall[0]["number"];
+  $callerepoch = $lastcall[0]["time_start"];
 
+  // get user data to get their timezone
+  $query = array(
+        'object' => 'subscriber',
+        'action'=> 'read',
+        'uid'    =>    "{$user}@{$domain}",
+        'format' => 'json',
+  );
+
+  $userinfo = __doCurl("https://".SERVER."/ns-api/", CURLOPT_POST, "Authorization: Bearer " . $token, $query, null, $http_response);
+  $userinfo = json_decode($userinfo,true);
+
+  // set timezone to user value
+  date_default_timezone_set($userinfo[0]["time_zone"]);
+
+  // convert epoch to format like Friday July 17 5 09
+  if (HOURCLOCK == 24)
+  {
+    $calldatetime = date('l F j G i', $callerepoch);
+  }
+  else
+  {
+    $calldatetime = date('l F j g i a', $callerepoch);
+  }
+
+  // turn the datetime string into an array to process later into wav files
+  $datetimearray = explode(' ', $calldatetime);
+  
+    
+  // few corner case checks before we continue...
   if (substr($caller,0,1) == "+")
   {
      // remove leading +
@@ -60,7 +91,7 @@ if (!isset($_REQUEST["Digits"]))
      exit();
   }
 
-  // generate sox command to combine the prompts and last caller number
+  // generate sox command to combine the prompts last caller number, and datetime
   $wavfiles = "sox " . AUDIOFOLDER . "lastcaller.wav ";
 
   // gets the digits from the caller
@@ -71,6 +102,38 @@ if (!isset($_REQUEST["Digits"]))
     $callerloop = substr($callerloop, 1);
     $wavfiles .= AUDIOFOLDER. "nms-word-{$digit}.wav ";
   }
+
+  // datetime wavs
+  // day of the week
+  $wavfiles .= AUDIOFOLDER . strtolower($datetimearray[0]) . '.wav ';
+  // month
+  $wavfiles .= AUDIOFOLDER . 'month-' . strtolower($datetimearray[1]) . '.wav ';
+  // day of the month
+  $wavfiles .= AUDIOFOLDER . 'monthday-' . strtolower($datetimearray[2]) . '.wav ';
+  // at
+  $wavfiles .= AUDIOFOLDER . 'nms-word-at.wav ';
+  // hour
+  $wavfiles .= AUDIOFOLDER . 'Hour-' . strtolower($datetimearray[3]) . '.wav ';
+
+  // minutes is tricky because less than 21 we have exact files while over 20 we need to combine two files
+  if ($datetimearray[4] <21)
+  {
+    $wavfiles .= AUDIOFOLDER . 'time-' . $datetimearray[4] . '.wav ';
+  }
+  else
+  {
+    $wavfiles .= AUDIOFOLDER . 'time-' . substr($datetimearray[4],0,1) . '0.wav ';
+    if (substr($datetimearray[4],1,2) != 0) // if we're at the top of the hour, nothing more to play
+    {
+      $wavfiles .= AUDIOFOLDER . 'nms-word-' . substr($datetimearray[4],1,2) . '.wav ';
+    }
+  }
+
+  if (HOURCLOCK == 12)
+  { //am pm playback
+    $wavfiles .= AUDIOFOLDER . 'time-' . $datetimearray[5] . '.wav ';
+  }
+    
   // adds the final prompt and output filename
   $wavfiles .= AUDIOFOLDER. "toreturn.wav {$tempfileuri}";
 
